@@ -1,0 +1,93 @@
+.tyese-aisite-admin {
+  max-width: 1280px;
+}
+
+.tyese-aisite-lede {
+  max-width: 760px;
+  color: #475569;
+  font-size: 15px;
+}
+
+.tyese-aisite-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.75fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.tyese-aisite-panel {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+}
+
+.tyese-aisite-panel h2 {
+  margin-top: 0;
+}
+
+.tyese-aisite-panel label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-weight: 700;
+}
+
+.tyese-aisite-panel input[type="text"],
+.tyese-aisite-panel input[type="password"],
+.tyese-aisite-panel input[type="url"],
+.tyese-aisite-panel textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
+.tyese-aisite-panel small {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.tyese-aisite-check {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.tyese-aisite-widget-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tyese-aisite-widget-list span {
+  padding: 5px 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #172033;
+  font-size: 12px;
+}
+
+.tyese-aisite-created {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.tyese-aisite-created li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+@media (max-width: 960px) {
+  .tyese-aisite-layout {
+    grid-template-columns: 1fr;
+  }
+}
