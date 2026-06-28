@@ -11,6 +11,7 @@ final class Tyese_AiSite_Admin {
     const OPTION = 'tyese_aisite_settings';
     const LAST_BLUEPRINT = 'tyese_aisite_last_blueprint';
     const LAST_CREATED = 'tyese_aisite_last_created';
+    const LAST_STATUS = 'tyese_aisite_last_status';
 
     public function __construct() {
         add_action( 'admin_menu', array( $this, 'menu' ) );
@@ -39,6 +40,7 @@ final class Tyese_AiSite_Admin {
         $inventory = ( new Tyese_AiSite_Widgets() )->inventory();
         $blueprint = get_option( self::LAST_BLUEPRINT, array() );
         $created   = get_option( self::LAST_CREATED, array() );
+        $status    = get_option( self::LAST_STATUS, array() );
         ?>
         <div class="wrap tyese-aisite-admin">
             <h1><?php esc_html_e( 'Tyese aiSite', 'tyese-aisite' ); ?></h1>
@@ -106,6 +108,11 @@ final class Tyese_AiSite_Admin {
 
             <div class="tyese-aisite-layout">
                 <section class="tyese-aisite-panel">
+                    <h2><?php esc_html_e( 'Build Status', 'tyese-aisite' ); ?></h2>
+                    <?php $this->render_status( $status, $created, $blueprint ); ?>
+                </section>
+
+                <section class="tyese-aisite-panel">
                     <h2><?php esc_html_e( 'Available Widget Inventory', 'tyese-aisite' ); ?></h2>
                     <p><?php echo esc_html( sprintf( __( '%d widgets available to the planner.', 'tyese-aisite' ), count( $inventory ) ) ); ?></p>
                     <div class="tyese-aisite-widget-list">
@@ -115,7 +122,7 @@ final class Tyese_AiSite_Admin {
                     </div>
                 </section>
 
-                <section class="tyese-aisite-panel">
+                <section class="tyese-aisite-panel tyese-aisite-wide">
                     <h2><?php esc_html_e( 'Last Build', 'tyese-aisite' ); ?></h2>
                     <?php if ( ! empty( $created ) ) : ?>
                         <ul class="tyese-aisite-created">
@@ -173,16 +180,44 @@ final class Tyese_AiSite_Admin {
 
         $blueprint = $client->generate_blueprint( $prompt, $reference_url, $widgets->names_for_prompt(), $brand_context );
         if ( is_wp_error( $blueprint ) ) {
+            $error_message = $blueprint->get_error_message();
             $blueprint = ( new Tyese_AiSite_Blueprint() )->fallback_blueprint();
+            $created   = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint ) : array();
+
             update_option( self::LAST_BLUEPRINT, $blueprint, false );
-            update_option( self::LAST_CREATED, array(), false );
-            wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', rawurlencode( $blueprint ? 'fallback_used' : 'failed' ), admin_url( 'admin.php?page=tyese-aisite' ) ) );
+            update_option( self::LAST_CREATED, $created, false );
+            update_option(
+                self::LAST_STATUS,
+                array(
+                    'state'         => 'complete',
+                    'source'        => 'fallback',
+                    'message'       => __( 'OpenAI failed, so Tyese aiSite built a safe fallback draft.', 'tyese-aisite' ),
+                    'error'         => $error_message,
+                    'created_count' => count( $created ),
+                    'finished_at'   => current_time( 'mysql' ),
+                ),
+                false
+            );
+
+            wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', 'fallback_used', admin_url( 'admin.php?page=tyese-aisite' ) ) );
             exit;
         }
 
         update_option( self::LAST_BLUEPRINT, $blueprint, false );
         $created = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint ) : array();
         update_option( self::LAST_CREATED, $created, false );
+        update_option(
+            self::LAST_STATUS,
+            array(
+                'state'         => 'complete',
+                'source'        => 'openai',
+                'message'       => __( 'OpenAI generated a blueprint and Tyese aiSite finished the draft build.', 'tyese-aisite' ),
+                'error'         => '',
+                'created_count' => count( $created ),
+                'finished_at'   => current_time( 'mysql' ),
+            ),
+            false
+        );
 
         wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', 'site_generated', admin_url( 'admin.php?page=tyese-aisite' ) ) );
         exit;
@@ -207,12 +242,38 @@ final class Tyese_AiSite_Admin {
         $messages = array(
             'settings_saved' => __( 'Settings saved.', 'tyese-aisite' ),
             'site_generated' => __( 'Site draft generated. Review the draft pages below before publishing.', 'tyese-aisite' ),
-            'fallback_used'  => __( 'OpenAI could not generate a blueprint, so Tyese aiSite created a safe fallback draft.', 'tyese-aisite' ),
+            'fallback_used'  => __( 'OpenAI could not generate a blueprint. Tyese aiSite finished and used the safe fallback draft instead; see Build Status below for the real error.', 'tyese-aisite' ),
             'failed'         => __( 'Tyese aiSite could not generate a blueprint.', 'tyese-aisite' ),
         );
 
         if ( isset( $messages[ $notice ] ) ) {
             echo '<div class="notice notice-success"><p>' . esc_html( $messages[ $notice ] ) . '</p></div>';
+        }
+    }
+
+    private function render_status( $status, $created, $blueprint ) {
+        if ( empty( $status ) ) {
+            echo '<p>' . esc_html__( 'No build is running. No completed build has been recorded yet.', 'tyese-aisite' ) . '</p>';
+            return;
+        }
+
+        $source = $status['source'] ?? 'unknown';
+        $badge  = 'fallback' === $source ? __( 'Fallback draft', 'tyese-aisite' ) : __( 'AI draft', 'tyese-aisite' );
+        echo '<p><span class="tyese-aisite-status-badge">' . esc_html__( 'Complete', 'tyese-aisite' ) . '</span> <strong>' . esc_html( $badge ) . '</strong></p>';
+        echo '<p>' . esc_html( $status['message'] ?? '' ) . '</p>';
+
+        if ( ! empty( $status['finished_at'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Finished:', 'tyese-aisite' ) . '</strong> ' . esc_html( $status['finished_at'] ) . '</p>';
+        }
+
+        echo '<p><strong>' . esc_html__( 'Draft pages created:', 'tyese-aisite' ) . '</strong> ' . esc_html( (string) count( (array) $created ) ) . '</p>';
+
+        if ( ! empty( $status['error'] ) ) {
+            echo '<div class="tyese-aisite-error"><strong>' . esc_html__( 'OpenAI error:', 'tyese-aisite' ) . '</strong><br>' . esc_html( $status['error'] ) . '</div>';
+        }
+
+        if ( ! empty( $blueprint['pages'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Blueprint pages:', 'tyese-aisite' ) . '</strong> ' . esc_html( implode( ', ', wp_list_pluck( $blueprint['pages'], 'title' ) ) ) . '</p>';
         }
     }
 }

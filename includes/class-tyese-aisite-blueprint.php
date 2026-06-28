@@ -45,7 +45,7 @@ final class Tyese_AiSite_Blueprint {
                                 'items' => array(
                                     'type'                 => 'object',
                                     'additionalProperties' => false,
-                                    'required'             => array( 'type', 'headline', 'body', 'widgets' ),
+                                    'required'             => array( 'type', 'headline', 'body', 'cta_text', 'cta_url', 'image_hint', 'widgets' ),
                                     'properties'           => array(
                                         'type'       => array( 'type' => 'string' ),
                                         'headline'   => array( 'type' => 'string' ),
@@ -61,7 +61,11 @@ final class Tyese_AiSite_Blueprint {
                                                 'required'             => array( 'widget', 'settings' ),
                                                 'properties'           => array(
                                                     'widget'   => array( 'type' => 'string' ),
-                                                    'settings' => array( 'type' => 'object' ),
+                                                    'settings' => array(
+                                                        'type'                 => 'object',
+                                                        'additionalProperties' => false,
+                                                        'properties'           => array(),
+                                                    ),
                                                 ),
                                             ),
                                         ),

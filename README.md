@@ -40,7 +40,7 @@ Reference URLs are used only for layout inspiration, section order, and general 
 
 ## First Version Scope
 
-This first version includes the plugin scaffold, dashboard, settings, OpenAI blueprint client, widget inventory, blueprint schema, and draft Elementor page creation.
+This first version includes the plugin scaffold, dashboard, settings, OpenAI blueprint client, widget inventory, blueprint schema, draft Elementor page creation, and a build status panel that shows whether the AI or fallback builder produced the latest draft.
 
 Next planned upgrades:
 
