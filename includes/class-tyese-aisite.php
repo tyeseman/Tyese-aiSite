@@ -55,8 +55,32 @@ final class Tyese_AiSite {
             echo '<div class="notice notice-error"><p>' . esc_html__( 'Tyese aiSite requires Elementor to be installed and activated.', 'tyese-aisite' ) . '</p></div>';
         }
 
-        if ( ! class_exists( 'Tyese_Elementor_Addon' ) ) {
+        if ( ! $this->has_tyese_widget_plugin() ) {
             echo '<div class="notice notice-warning"><p>' . esc_html__( 'Tyese aiSite is designed to work with Tyese Addon for Elementor. Install and activate it for the best widget coverage.', 'tyese-aisite' ) . '</p></div>';
         }
+    }
+
+    private function has_tyese_widget_plugin() {
+        if ( class_exists( 'Tyese_Elementor_Addon' ) || class_exists( 'Tyese_Elementor_Widget_Registry' ) ) {
+            return true;
+        }
+
+        if ( ! function_exists( 'is_plugin_active' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        $known_plugins = array(
+            'tyese-addon-for-elementor/tyese-addon-for-elementor.php',
+            'tyese-page-builder/tyese-page-builder.php',
+            'Tyese-Addon-for-Elementor/tyese-addon-for-elementor.php',
+        );
+
+        foreach ( $known_plugins as $plugin ) {
+            if ( is_plugin_active( $plugin ) ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

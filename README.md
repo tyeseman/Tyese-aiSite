@@ -9,7 +9,7 @@ It is designed to work inside the existing Elementor ecosystem. It does not repl
 - WordPress 6.4+
 - PHP 7.4+
 - Elementor installed and active
-- Tyese Addon for Elementor installed and active
+- Tyese Addon for Elementor installed and active, or the older first-working Tyese widget plugin while migrating
 - OpenAI API key
 
 ## What It Does
