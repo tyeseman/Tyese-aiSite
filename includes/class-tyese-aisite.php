@@ -24,6 +24,7 @@ final class Tyese_AiSite {
 
     public function load() {
         require_once TYESE_AISITE_PATH . 'includes/class-tyese-aisite-widgets.php';
+        require_once TYESE_AISITE_PATH . 'includes/class-tyese-aisite-site-scanner.php';
         require_once TYESE_AISITE_PATH . 'includes/class-tyese-aisite-blueprint.php';
         require_once TYESE_AISITE_PATH . 'includes/class-tyese-aisite-openai.php';
         require_once TYESE_AISITE_PATH . 'includes/class-tyese-aisite-elementor-builder.php';

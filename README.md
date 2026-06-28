@@ -21,6 +21,8 @@ It is designed to work inside the existing Elementor ecosystem. It does not repl
 - Generates a structured site blueprint.
 - Converts the blueprint into draft WordPress pages with Elementor data.
 - Keeps generated pages editable through Elementor.
+- Scans the current site before building so it can create new drafts, draft-copy existing pages, or replace selected pages safely.
+- Lets the builder choose Elementor Canvas, Elementor Full Width, or the theme default page template when the active theme does not match the design direction.
 
 ## Builder Philosophy
 

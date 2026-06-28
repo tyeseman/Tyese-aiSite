@@ -38,6 +38,7 @@ final class Tyese_AiSite_Admin {
 
         $settings  = $this->settings();
         $inventory = ( new Tyese_AiSite_Widgets() )->inventory();
+        $site_scan = ( new Tyese_AiSite_Site_Scanner() )->scan();
         $blueprint = get_option( self::LAST_BLUEPRINT, array() );
         $created   = get_option( self::LAST_CREATED, array() );
         $status    = get_option( self::LAST_STATUS, array() );
@@ -76,6 +77,39 @@ final class Tyese_AiSite_Admin {
                             <span><?php esc_html_e( 'Create draft Elementor pages after generating the blueprint', 'tyese-aisite' ); ?></span>
                         </label>
 
+                        <div class="tyese-aisite-build-options">
+                            <h3><?php esc_html_e( 'Build Mode', 'tyese-aisite' ); ?></h3>
+                            <label>
+                                <span><?php esc_html_e( 'How should Tyese aiSite handle current pages?', 'tyese-aisite' ); ?></span>
+                                <select name="build_mode">
+                                    <option value="create_new"><?php esc_html_e( 'Create new draft pages and leave current pages alone', 'tyese-aisite' ); ?></option>
+                                    <option value="update_existing"><?php esc_html_e( 'Create AI draft copies for selected existing pages', 'tyese-aisite' ); ?></option>
+                                    <option value="replace_selected"><?php esc_html_e( 'Replace selected pages as drafts after saving a backup', 'tyese-aisite' ); ?></option>
+                                </select>
+                            </label>
+
+                            <label>
+                                <span><?php esc_html_e( 'Page template / theme handling', 'tyese-aisite' ); ?></span>
+                                <select name="page_template">
+                                    <option value="elementor_canvas"><?php esc_html_e( 'Elementor Canvas - ignore theme layout', 'tyese-aisite' ); ?></option>
+                                    <option value="elementor_header_footer"><?php esc_html_e( 'Elementor Full Width - keep theme header/footer', 'tyese-aisite' ); ?></option>
+                                    <option value="default"><?php esc_html_e( 'Theme default template', 'tyese-aisite' ); ?></option>
+                                </select>
+                            </label>
+
+                            <label class="tyese-aisite-check">
+                                <input type="checkbox" name="set_homepage" value="1">
+                                <span><?php esc_html_e( 'Set the first generated page as the site homepage', 'tyese-aisite' ); ?></span>
+                            </label>
+
+                            <label class="tyese-aisite-check">
+                                <input type="checkbox" name="backup_originals" value="1" checked>
+                                <span><?php esc_html_e( 'Save backup metadata before touching selected existing pages', 'tyese-aisite' ); ?></span>
+                            </label>
+
+                            <?php $this->render_page_picker( $site_scan['pages'] ); ?>
+                        </div>
+
                         <button type="submit" class="button button-primary button-hero"><?php esc_html_e( 'Generate Site Draft', 'tyese-aisite' ); ?></button>
                     </form>
                 </section>
@@ -107,6 +141,11 @@ final class Tyese_AiSite_Admin {
             </div>
 
             <div class="tyese-aisite-layout">
+                <section class="tyese-aisite-panel tyese-aisite-wide">
+                    <h2><?php esc_html_e( 'Current Site Scan', 'tyese-aisite' ); ?></h2>
+                    <?php $this->render_site_scan( $site_scan ); ?>
+                </section>
+
                 <section class="tyese-aisite-panel">
                     <h2><?php esc_html_e( 'Build Status', 'tyese-aisite' ); ?></h2>
                     <?php $this->render_status( $status, $created, $blueprint ); ?>
@@ -175,14 +214,28 @@ final class Tyese_AiSite_Admin {
         $reference_url = esc_url_raw( wp_unslash( $_POST['reference_url'] ?? '' ) );
         $brand_context = sanitize_textarea_field( wp_unslash( $_POST['brand_context'] ?? $settings['brand_context'] ?? '' ) );
         $build_pages   = ! empty( $_POST['build_pages'] );
+        $build_mode    = sanitize_key( wp_unslash( $_POST['build_mode'] ?? 'create_new' ) );
+        $page_template = sanitize_key( wp_unslash( $_POST['page_template'] ?? 'elementor_canvas' ) );
+        $selected_pages = array_map( 'absint', (array) ( $_POST['selected_pages'] ?? array() ) );
+        $set_homepage  = ! empty( $_POST['set_homepage'] );
+        $backup_originals = ! empty( $_POST['backup_originals'] );
         $widgets       = new Tyese_AiSite_Widgets();
+        $scanner       = new Tyese_AiSite_Site_Scanner();
+        $brand_context .= "\n\nCurrent WordPress site scan:\n" . $scanner->prompt_context();
         $client        = new Tyese_AiSite_OpenAI( $settings['api_key'] ?? '', $settings['model'] ?? 'gpt-5-mini' );
+        $builder_args  = array(
+            'mode'             => $build_mode,
+            'selected_pages'   => $selected_pages,
+            'page_template'    => $page_template,
+            'set_homepage'     => $set_homepage,
+            'backup_originals' => $backup_originals,
+        );
 
         $blueprint = $client->generate_blueprint( $prompt, $reference_url, $widgets->names_for_prompt(), $brand_context );
         if ( is_wp_error( $blueprint ) ) {
             $error_message = $blueprint->get_error_message();
             $blueprint = ( new Tyese_AiSite_Blueprint() )->fallback_blueprint();
-            $created   = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint ) : array();
+            $created   = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint, $builder_args ) : array();
 
             update_option( self::LAST_BLUEPRINT, $blueprint, false );
             update_option( self::LAST_CREATED, $created, false );
@@ -194,6 +247,8 @@ final class Tyese_AiSite_Admin {
                     'message'       => __( 'OpenAI failed, so Tyese aiSite built a safe fallback draft.', 'tyese-aisite' ),
                     'error'         => $error_message,
                     'created_count' => count( $created ),
+                    'build_mode'    => $build_mode,
+                    'page_template' => $page_template,
                     'finished_at'   => current_time( 'mysql' ),
                 ),
                 false
@@ -204,7 +259,7 @@ final class Tyese_AiSite_Admin {
         }
 
         update_option( self::LAST_BLUEPRINT, $blueprint, false );
-        $created = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint ) : array();
+        $created = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint, $builder_args ) : array();
         update_option( self::LAST_CREATED, $created, false );
         update_option(
             self::LAST_STATUS,
@@ -214,6 +269,8 @@ final class Tyese_AiSite_Admin {
                 'message'       => __( 'OpenAI generated a blueprint and Tyese aiSite finished the draft build.', 'tyese-aisite' ),
                 'error'         => '',
                 'created_count' => count( $created ),
+                'build_mode'    => $build_mode,
+                'page_template' => $page_template,
                 'finished_at'   => current_time( 'mysql' ),
             ),
             false
@@ -266,6 +323,14 @@ final class Tyese_AiSite_Admin {
             echo '<p><strong>' . esc_html__( 'Finished:', 'tyese-aisite' ) . '</strong> ' . esc_html( $status['finished_at'] ) . '</p>';
         }
 
+        if ( ! empty( $status['build_mode'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Build mode:', 'tyese-aisite' ) . '</strong> ' . esc_html( str_replace( '_', ' ', $status['build_mode'] ) ) . '</p>';
+        }
+
+        if ( ! empty( $status['page_template'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Page template:', 'tyese-aisite' ) . '</strong> ' . esc_html( str_replace( '_', ' ', $status['page_template'] ) ) . '</p>';
+        }
+
         echo '<p><strong>' . esc_html__( 'Draft pages created:', 'tyese-aisite' ) . '</strong> ' . esc_html( (string) count( (array) $created ) ) . '</p>';
 
         if ( ! empty( $status['error'] ) ) {
@@ -275,5 +340,32 @@ final class Tyese_AiSite_Admin {
         if ( ! empty( $blueprint['pages'] ) ) {
             echo '<p><strong>' . esc_html__( 'Blueprint pages:', 'tyese-aisite' ) . '</strong> ' . esc_html( implode( ', ', wp_list_pluck( $blueprint['pages'], 'title' ) ) ) . '</p>';
         }
+    }
+
+    private function render_page_picker( $pages ) {
+        if ( empty( $pages ) ) {
+            echo '<p class="tyese-aisite-muted">' . esc_html__( 'No existing pages found. New Site Mode is the right choice.', 'tyese-aisite' ) . '</p>';
+            return;
+        }
+
+        echo '<div class="tyese-aisite-page-picker">';
+        echo '<strong>' . esc_html__( 'Existing pages Tyese aiSite may work from:', 'tyese-aisite' ) . '</strong>';
+        foreach ( $pages as $page ) {
+            echo '<label class="tyese-aisite-page-row">';
+            echo '<input type="checkbox" name="selected_pages[]" value="' . esc_attr( $page['id'] ) . '">';
+            echo '<span>' . esc_html( $page['title'] ) . ' <small>' . esc_html( '#' . $page['id'] . ' - ' . $page['status'] . ' - ' . ( $page['is_elementor'] ? 'Elementor' : 'Classic/unknown' ) ) . '</small></span>';
+            echo '</label>';
+        }
+        echo '</div>';
+    }
+
+    private function render_site_scan( $scan ) {
+        echo '<div class="tyese-aisite-scan-grid">';
+        echo '<div><strong>' . esc_html__( 'Theme', 'tyese-aisite' ) . '</strong><span>' . esc_html( $scan['theme']['name'] . ' ' . $scan['theme']['version'] ) . '</span></div>';
+        echo '<div><strong>' . esc_html__( 'Homepage', 'tyese-aisite' ) . '</strong><span>' . esc_html( 'page' === $scan['homepage']['show_on_front'] ? '#' . $scan['homepage']['page_on_front'] : __( 'Latest posts', 'tyese-aisite' ) ) . '</span></div>';
+        echo '<div><strong>' . esc_html__( 'Pages', 'tyese-aisite' ) . '</strong><span>' . esc_html( (string) count( $scan['pages'] ) ) . '</span></div>';
+        echo '<div><strong>' . esc_html__( 'Menus', 'tyese-aisite' ) . '</strong><span>' . esc_html( (string) count( $scan['menus'] ) ) . '</span></div>';
+        echo '</div>';
+        echo '<p class="tyese-aisite-muted">' . esc_html__( 'When the installed theme does not match the requested design direction, choose Elementor Canvas or Elementor Full Width so the generated page controls more of the layout.', 'tyese-aisite' ) . '</p>';
     }
 }

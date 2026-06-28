@@ -57,6 +57,69 @@
   gap: 8px !important;
 }
 
+.tyese-aisite-build-options {
+  padding: 14px;
+  margin: 16px 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.tyese-aisite-build-options h3 {
+  margin: 0 0 12px;
+}
+
+.tyese-aisite-page-picker {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+}
+
+.tyese-aisite-page-row {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: flex-start;
+  gap: 8px !important;
+  margin: 0 !important;
+  font-weight: 600 !important;
+}
+
+.tyese-aisite-page-row small {
+  display: block;
+}
+
+.tyese-aisite-scan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.tyese-aisite-scan-grid div {
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.tyese-aisite-scan-grid strong,
+.tyese-aisite-scan-grid span {
+  display: block;
+}
+
+.tyese-aisite-scan-grid span {
+  margin-top: 4px;
+  color: #475569;
+}
+
+.tyese-aisite-muted {
+  color: #64748b;
+}
+
 .tyese-aisite-widget-list {
   display: flex;
   flex-wrap: wrap;
@@ -117,5 +180,9 @@
 @media (max-width: 960px) {
   .tyese-aisite-layout {
     grid-template-columns: 1fr;
+  }
+
+  .tyese-aisite-scan-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
