@@ -44,6 +44,8 @@ Reference URLs are used only for layout inspiration, section order, and general 
 
 This first version includes the plugin scaffold, dashboard, settings, OpenAI blueprint client, widget inventory, blueprint schema, draft Elementor page creation, and a build status panel that shows whether the AI or fallback builder produced the latest draft.
 
+Version 0.2.1 fixes the OpenAI structured-output schema so empty widget settings are sent as a JSON object instead of an array.
+
 Next planned upgrades:
 
 - Follow-up edit commands for existing pages.

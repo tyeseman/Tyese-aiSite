@@ -64,7 +64,7 @@ final class Tyese_AiSite_Blueprint {
                                                     'settings' => array(
                                                         'type'                 => 'object',
                                                         'additionalProperties' => false,
-                                                        'properties'           => array(),
+                                                        'properties'           => new stdClass(),
                                                     ),
                                                 ),
                                             ),
