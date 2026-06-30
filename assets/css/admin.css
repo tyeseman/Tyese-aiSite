@@ -168,6 +168,13 @@
   text-transform: uppercase;
 }
 
+.tyese-aisite-status-badge.is-queued,
+.tyese-aisite-status-badge.is-running {
+  color: #854d0e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
 .tyese-aisite-error {
   padding: 10px 12px;
   margin: 12px 0;

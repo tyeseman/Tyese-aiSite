@@ -46,6 +46,8 @@ This first version includes the plugin scaffold, dashboard, settings, OpenAI blu
 
 Version 0.2.1 fixes the OpenAI structured-output schema so empty widget settings are sent as a JSON object instead of an array.
 
+Version 0.2.2 queues site generation as a WordPress background build so nginx does not time out while OpenAI is generating the blueprint.
+
 Next planned upgrades:
 
 - Follow-up edit commands for existing pages.

@@ -33,9 +33,7 @@ final class Tyese_AiSite {
         add_action( 'admin_notices', array( $this, 'dependency_notices' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'admin_assets' ) );
 
-        if ( is_admin() ) {
-            new Tyese_AiSite_Admin();
-        }
+        new Tyese_AiSite_Admin();
     }
 
     public function admin_assets( $hook ) {

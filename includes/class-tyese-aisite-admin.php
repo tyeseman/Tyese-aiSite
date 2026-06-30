@@ -12,11 +12,13 @@ final class Tyese_AiSite_Admin {
     const LAST_BLUEPRINT = 'tyese_aisite_last_blueprint';
     const LAST_CREATED = 'tyese_aisite_last_created';
     const LAST_STATUS = 'tyese_aisite_last_status';
+    const PENDING_JOB = 'tyese_aisite_pending_job';
 
     public function __construct() {
         add_action( 'admin_menu', array( $this, 'menu' ) );
         add_action( 'admin_post_tyese_aisite_save_settings', array( $this, 'save_settings' ) );
         add_action( 'admin_post_tyese_aisite_generate', array( $this, 'generate' ) );
+        add_action( 'tyese_aisite_run_build', array( $this, 'run_queued_build' ) );
     }
 
     public function menu() {
@@ -43,7 +45,7 @@ final class Tyese_AiSite_Admin {
         $created   = get_option( self::LAST_CREATED, array() );
         $status    = get_option( self::LAST_STATUS, array() );
         ?>
-        <div class="wrap tyese-aisite-admin">
+        <div class="wrap tyese-aisite-admin" data-tyese-build-state="<?php echo esc_attr( $status['state'] ?? 'idle' ); ?>">
             <h1><?php esc_html_e( 'Tyese aiSite', 'tyese-aisite' ); ?></h1>
             <p class="tyese-aisite-lede"><?php esc_html_e( 'Build editable Elementor website drafts from a prompt using Elementor, Tyese widgets, and compatible installed widgets.', 'tyese-aisite' ); ?></p>
 
@@ -231,7 +233,79 @@ final class Tyese_AiSite_Admin {
             'backup_originals' => $backup_originals,
         );
 
-        $blueprint = $client->generate_blueprint( $prompt, $reference_url, $widgets->names_for_prompt(), $brand_context );
+        $job = array(
+            'prompt'        => $prompt,
+            'reference_url' => $reference_url,
+            'brand_context' => $brand_context,
+            'build_pages'   => $build_pages,
+            'builder_args'  => $builder_args,
+            'settings'      => array(
+                'api_key' => $settings['api_key'] ?? '',
+                'model'   => $settings['model'] ?? 'gpt-5-mini',
+            ),
+            'created_at'    => current_time( 'mysql' ),
+        );
+
+        update_option( self::PENDING_JOB, $job, false );
+        update_option(
+            self::LAST_STATUS,
+            array(
+                'state'         => 'queued',
+                'source'        => 'pending',
+                'message'       => __( 'Build queued. You can stay on this page; Tyese aiSite will refresh the status while the background job runs.', 'tyese-aisite' ),
+                'error'         => '',
+                'created_count' => 0,
+                'build_mode'    => $build_mode,
+                'page_template' => $page_template,
+                'queued_at'     => current_time( 'mysql' ),
+            ),
+            false
+        );
+
+        if ( ! wp_next_scheduled( 'tyese_aisite_run_build' ) ) {
+            wp_schedule_single_event( time() + 1, 'tyese_aisite_run_build' );
+        }
+
+        if ( function_exists( 'spawn_cron' ) ) {
+            spawn_cron( time() );
+        }
+
+        wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', 'build_queued', admin_url( 'admin.php?page=tyese-aisite' ) ) );
+        exit;
+    }
+
+    public function run_queued_build() {
+        $job = get_option( self::PENDING_JOB, array() );
+        if ( empty( $job ) || ! is_array( $job ) ) {
+            return;
+        }
+
+        update_option(
+            self::LAST_STATUS,
+            array(
+                'state'         => 'running',
+                'source'        => 'pending',
+                'message'       => __( 'Tyese aiSite is generating the blueprint and building draft pages in the background.', 'tyese-aisite' ),
+                'error'         => '',
+                'created_count' => 0,
+                'build_mode'    => $job['builder_args']['mode'] ?? 'create_new',
+                'page_template' => $job['builder_args']['page_template'] ?? 'elementor_canvas',
+                'started_at'    => current_time( 'mysql' ),
+            ),
+            false
+        );
+
+        $widgets = new Tyese_AiSite_Widgets();
+        $client  = new Tyese_AiSite_OpenAI( $job['settings']['api_key'] ?? '', $job['settings']['model'] ?? 'gpt-5-mini' );
+        $this->execute_build( $client, $widgets, $job );
+        delete_option( self::PENDING_JOB );
+    }
+
+    private function execute_build( $client, $widgets, $job ) {
+        $build_pages  = ! empty( $job['build_pages'] );
+        $builder_args = is_array( $job['builder_args'] ?? null ) ? $job['builder_args'] : array();
+
+        $blueprint = $client->generate_blueprint( $job['prompt'] ?? '', $job['reference_url'] ?? '', $widgets->names_for_prompt(), $job['brand_context'] ?? '' );
         if ( is_wp_error( $blueprint ) ) {
             $error_message = $blueprint->get_error_message();
             $blueprint = ( new Tyese_AiSite_Blueprint() )->fallback_blueprint();
@@ -247,15 +321,13 @@ final class Tyese_AiSite_Admin {
                     'message'       => __( 'OpenAI failed, so Tyese aiSite built a safe fallback draft.', 'tyese-aisite' ),
                     'error'         => $error_message,
                     'created_count' => count( $created ),
-                    'build_mode'    => $build_mode,
-                    'page_template' => $page_template,
+                    'build_mode'    => $builder_args['mode'] ?? 'create_new',
+                    'page_template' => $builder_args['page_template'] ?? 'elementor_canvas',
                     'finished_at'   => current_time( 'mysql' ),
                 ),
                 false
             );
-
-            wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', 'fallback_used', admin_url( 'admin.php?page=tyese-aisite' ) ) );
-            exit;
+            return;
         }
 
         update_option( self::LAST_BLUEPRINT, $blueprint, false );
@@ -269,15 +341,12 @@ final class Tyese_AiSite_Admin {
                 'message'       => __( 'OpenAI generated a blueprint and Tyese aiSite finished the draft build.', 'tyese-aisite' ),
                 'error'         => '',
                 'created_count' => count( $created ),
-                'build_mode'    => $build_mode,
-                'page_template' => $page_template,
+                'build_mode'    => $builder_args['mode'] ?? 'create_new',
+                'page_template' => $builder_args['page_template'] ?? 'elementor_canvas',
                 'finished_at'   => current_time( 'mysql' ),
             ),
             false
         );
-
-        wp_safe_redirect( add_query_arg( 'tyese_aisite_notice', 'site_generated', admin_url( 'admin.php?page=tyese-aisite' ) ) );
-        exit;
     }
 
     private function settings() {
@@ -298,6 +367,7 @@ final class Tyese_AiSite_Admin {
 
         $messages = array(
             'settings_saved' => __( 'Settings saved.', 'tyese-aisite' ),
+            'build_queued'   => __( 'Build queued. This page will return immediately and refresh while the background job runs.', 'tyese-aisite' ),
             'site_generated' => __( 'Site draft generated. Review the draft pages below before publishing.', 'tyese-aisite' ),
             'fallback_used'  => __( 'OpenAI could not generate a blueprint. Tyese aiSite finished and used the safe fallback draft instead; see Build Status below for the real error.', 'tyese-aisite' ),
             'failed'         => __( 'Tyese aiSite could not generate a blueprint.', 'tyese-aisite' ),
@@ -314,10 +384,19 @@ final class Tyese_AiSite_Admin {
             return;
         }
 
+        $state = $status['state'] ?? 'complete';
         $source = $status['source'] ?? 'unknown';
-        $badge  = 'fallback' === $source ? __( 'Fallback draft', 'tyese-aisite' ) : __( 'AI draft', 'tyese-aisite' );
-        echo '<p><span class="tyese-aisite-status-badge">' . esc_html__( 'Complete', 'tyese-aisite' ) . '</span> <strong>' . esc_html( $badge ) . '</strong></p>';
+        $badge  = 'fallback' === $source ? __( 'Fallback draft', 'tyese-aisite' ) : ( 'pending' === $source ? __( 'Background build', 'tyese-aisite' ) : __( 'AI draft', 'tyese-aisite' ) );
+        echo '<p><span class="tyese-aisite-status-badge is-' . esc_attr( $state ) . '">' . esc_html( ucwords( $state ) ) . '</span> <strong>' . esc_html( $badge ) . '</strong></p>';
         echo '<p>' . esc_html( $status['message'] ?? '' ) . '</p>';
+
+        if ( ! empty( $status['queued_at'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Queued:', 'tyese-aisite' ) . '</strong> ' . esc_html( $status['queued_at'] ) . '</p>';
+        }
+
+        if ( ! empty( $status['started_at'] ) ) {
+            echo '<p><strong>' . esc_html__( 'Started:', 'tyese-aisite' ) . '</strong> ' . esc_html( $status['started_at'] ) . '</p>';
+        }
 
         if ( ! empty( $status['finished_at'] ) ) {
             echo '<p><strong>' . esc_html__( 'Finished:', 'tyese-aisite' ) . '</strong> ' . esc_html( $status['finished_at'] ) . '</p>';
