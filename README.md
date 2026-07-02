@@ -50,6 +50,8 @@ Version 0.2.2 queues site generation as a WordPress background build so nginx do
 
 Version 0.3.0 adds a template-based Elementor layout engine with generated headers, section grids, CTAs, footer, WordPress menu creation, controlled image placeholders, and build validation warnings.
 
+Version 0.4.0 adds universal page-type governance, required baseline navigation, a template registry, responsive spacing rules, broader section routing, and stronger mobile stacking defaults for many kinds of websites.
+
 Next planned upgrades:
 
 - Follow-up edit commands for existing pages.

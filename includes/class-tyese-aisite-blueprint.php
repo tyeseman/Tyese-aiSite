@@ -36,10 +36,11 @@ final class Tyese_AiSite_Blueprint {
                     'items' => array(
                         'type'                 => 'object',
                         'additionalProperties' => false,
-                        'required'             => array( 'title', 'slug', 'sections' ),
+                        'required'             => array( 'title', 'slug', 'page_type', 'sections' ),
                         'properties'           => array(
                             'title'    => array( 'type' => 'string' ),
                             'slug'     => array( 'type' => 'string' ),
+                            'page_type' => array( 'type' => 'string' ),
                             'sections' => array(
                                 'type'  => 'array',
                                 'items' => array(
@@ -102,6 +103,7 @@ final class Tyese_AiSite_Blueprint {
             $pages[] = array(
                 'title'    => sanitize_text_field( $page['title'] ?? __( 'Generated Page', 'tyese-aisite' ) ),
                 'slug'     => sanitize_title( $page['slug'] ?? $page['title'] ?? 'generated-page' ),
+                'page_type'=> $this->normalize_page_type( $page['page_type'] ?? $page['slug'] ?? $page['title'] ?? 'generic' ),
                 'sections' => $sections,
             );
         }
@@ -133,6 +135,26 @@ final class Tyese_AiSite_Blueprint {
         return $clean;
     }
 
+    private function normalize_page_type( $page_type ) {
+        $page_type = sanitize_key( $page_type );
+        $registry = class_exists( 'Tyese_AiSite_Template_Registry' ) ? new Tyese_AiSite_Template_Registry() : null;
+        $allowed = $registry ? $registry->page_types() : array( 'home', 'about', 'services', 'team', 'platform', 'product', 'pricing', 'portfolio', 'news', 'events', 'contact', 'landing', 'generic' );
+
+        if ( in_array( $page_type, $allowed, true ) ) {
+            return $page_type;
+        }
+
+        if ( false !== strpos( $page_type, 'service' ) ) {
+            return 'services';
+        }
+
+        if ( false !== strpos( $page_type, 'blog' ) || false !== strpos( $page_type, 'article' ) ) {
+            return 'news';
+        }
+
+        return 'generic';
+    }
+
     public function fallback_blueprint() {
         return array(
             'site_name' => get_bloginfo( 'name' ) ?: 'Tyese aiSite',
@@ -145,6 +167,7 @@ final class Tyese_AiSite_Blueprint {
                 array(
                     'title'    => 'Home',
                     'slug'     => 'home',
+                    'page_type'=> 'home',
                     'sections' => array(
                         array(
                             'type'       => 'hero',
