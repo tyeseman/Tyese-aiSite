@@ -1,6 +1,6 @@
 <?php
 /**
- * Converts normalized blueprints into editable Elementor draft pages.
+ * Converts normalized blueprints into structured, editable Elementor draft pages.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -8,38 +8,49 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 final class Tyese_AiSite_Elementor_Builder {
+    private $warnings = array();
+    private $brand = array();
+
     public function build( $blueprint, $args = array() ) {
         $args = wp_parse_args(
             $args,
             array(
-                'mode'              => 'create_new',
-                'selected_pages'    => array(),
-                'page_template'     => 'elementor_canvas',
-                'set_homepage'      => false,
-                'backup_originals'  => true,
+                'mode'             => 'create_new',
+                'selected_pages'   => array(),
+                'page_template'    => 'elementor_canvas',
+                'set_homepage'     => false,
+                'backup_originals' => true,
             )
         );
 
-        $created = array();
-        $selected_pages = array_values( array_filter( array_map( 'absint', (array) $args['selected_pages'] ) ) );
+        $this->warnings = array();
+        $this->brand    = $this->brand_tokens( $blueprint['brand'] ?? array() );
 
-        foreach ( array_values( $blueprint['pages'] ?? array() ) as $index => $page ) {
+        $created        = array();
+        $selected_pages = array_values( array_filter( array_map( 'absint', (array) $args['selected_pages'] ) ) );
+        $pages          = array_values( $blueprint['pages'] ?? array() );
+
+        foreach ( $pages as $index => $page ) {
             $target_id = $selected_pages[ $index ] ?? 0;
             $post_id   = $this->prepare_post_for_page( $page, $target_id, $args );
 
             if ( is_wp_error( $post_id ) ) {
+                $this->warnings[] = $post_id->get_error_message();
                 continue;
             }
 
-            $elementor_data = $this->page_elements( $page );
+            $elementor_data = $this->page_elements( $page, $blueprint, $index );
+            $validation     = $this->validate_page_elements( $elementor_data );
 
             update_post_meta( $post_id, '_elementor_edit_mode', 'builder' );
             update_post_meta( $post_id, '_elementor_template_type', 'wp-page' );
             update_post_meta( $post_id, '_elementor_version', defined( 'ELEMENTOR_VERSION' ) ? ELEMENTOR_VERSION : '3.0.0' );
             update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $elementor_data ) ) );
+            update_post_meta( $post_id, '_elementor_page_settings', wp_slash( wp_json_encode( $this->page_settings() ) ) );
             update_post_meta( $post_id, '_wp_page_template', $this->allowed_template( $args['page_template'] ) );
             update_post_meta( $post_id, '_tyese_aisite_blueprint', wp_slash( wp_json_encode( $page ) ) );
             update_post_meta( $post_id, '_tyese_aisite_build_mode', sanitize_key( $args['mode'] ) );
+            update_post_meta( $post_id, '_tyese_aisite_validation', wp_slash( wp_json_encode( $validation ) ) );
 
             $created[] = array(
                 'id'    => $post_id,
@@ -49,12 +60,539 @@ final class Tyese_AiSite_Elementor_Builder {
             );
         }
 
+        if ( ! empty( $created ) ) {
+            $this->create_menu( $blueprint['site_name'] ?? get_bloginfo( 'name' ), $created );
+        }
+
         if ( ! empty( $args['set_homepage'] ) && ! empty( $created[0]['id'] ) ) {
             update_option( 'show_on_front', 'page' );
             update_option( 'page_on_front', absint( $created[0]['id'] ) );
         }
 
         return $created;
+    }
+
+    public function get_warnings() {
+        return array_values( array_unique( array_filter( $this->warnings ) ) );
+    }
+
+    private function page_elements( $page, $blueprint, $page_index ) {
+        $sections = $this->normalize_sections( $page['sections'] ?? array() );
+        $elements = array();
+
+        $elements[] = $this->template_header( $blueprint['site_name'] ?? $page['title'], $sections );
+
+        foreach ( $sections as $index => $section ) {
+            $type = $this->section_type( $section );
+
+            if ( 0 === $index && 'hero' !== $type ) {
+                $elements[] = $this->template_hero( $section, $page );
+                continue;
+            }
+
+            switch ( $type ) {
+                case 'hero':
+                    $elements[] = $this->template_hero( $section, $page );
+                    break;
+                case 'team':
+                case 'staff':
+                    $elements[] = $this->template_team_grid( $section );
+                    break;
+                case 'platform':
+                case 'pillars':
+                case 'features':
+                    $elements[] = $this->template_card_grid( $section, 4 );
+                    break;
+                case 'cta':
+                case 'contact':
+                    $elements[] = $this->template_cta( $section );
+                    break;
+                default:
+                    $elements[] = $this->template_content_band( $section, $index );
+                    break;
+            }
+        }
+
+        if ( empty( $sections ) ) {
+            $elements[] = $this->template_hero(
+                array(
+                    'headline' => $page['title'],
+                    'body'     => __( 'A polished Elementor-ready page generated by Tyese aiSite.', 'tyese-aisite' ),
+                    'cta_text' => __( 'Get Involved', 'tyese-aisite' ),
+                    'cta_url'  => '#contact',
+                    'type'     => 'hero',
+                ),
+                $page
+            );
+        }
+
+        $elements[] = $this->template_footer( $blueprint['site_name'] ?? get_bloginfo( 'name' ) );
+
+        return $elements;
+    }
+
+    private function template_header( $site_name, $sections ) {
+        $nav_items = $this->nav_items_from_sections( $sections );
+        $left      = array( $this->widget( 'heading', array( 'title' => $site_name, 'header_size' => 'h4' ) ) );
+        $center    = array( $this->html_widget( $this->nav_html( $nav_items ) ) );
+        $right     = array( $this->widget( 'button', array( 'text' => __( 'Get Involved', 'tyese-aisite' ), 'link' => array( 'url' => '#contact' ), 'button_type' => 'info' ) ) );
+
+        return $this->section(
+            array( 24, 52, 24 ),
+            array( $left, $center, $right ),
+            array(
+                'css_classes'      => 'tyese-ai-header',
+                'background_color' => '#ffffff',
+                'padding'          => array( 14, 36, 14, 36 ),
+                'sticky'           => 'top',
+                'z_index'          => 50,
+                'box_shadow'       => true,
+            )
+        );
+    }
+
+    private function template_hero( $section, $page ) {
+        $headline = $section['headline'] ?: $page['title'];
+        $body     = $section['body'] ?: __( 'A focused message for this campaign or organization.', 'tyese-aisite' );
+        $cta_text = $section['cta_text'] ?: __( 'Learn More', 'tyese-aisite' );
+        $cta_url  = $section['cta_url'] ?: '#platform';
+
+        $left = array(
+            $this->widget( 'heading', array( 'title' => $headline, 'header_size' => 'h1' ) ),
+            $this->widget( 'text-editor', array( 'editor' => wpautop( $body ) ) ),
+            $this->widget( 'button', array( 'text' => $cta_text, 'link' => array( 'url' => $cta_url ), 'button_type' => 'info' ) ),
+        );
+
+        $right = array( $this->image_placeholder_widget( $section['image_hint'] ?? $headline ) );
+
+        return $this->section(
+            array( 56, 44 ),
+            array( $left, $right ),
+            array(
+                'css_id'           => 'top',
+                'css_classes'      => 'tyese-ai-hero',
+                'background_color' => $this->brand['soft'],
+                'padding'          => array( 86, 42, 76, 42 ),
+            )
+        );
+    }
+
+    private function template_team_grid( $section ) {
+        $items = $this->smart_items( $section, 6, array( 'President', 'Vice President', 'Secretary', 'Treasurer', 'Organizer', 'Advisor' ) );
+        $cards = array();
+
+        foreach ( $items as $index => $item ) {
+            $cards[] = array(
+                $this->image_placeholder_widget( $item['title'] ),
+                $this->widget( 'heading', array( 'title' => $item['title'], 'header_size' => $index < 2 ? 'h3' : 'h4' ) ),
+                $this->widget( 'text-editor', array( 'editor' => wpautop( $item['text'] ) ) ),
+            );
+        }
+
+        return $this->section_with_intro_grid( $section, $cards, 'team', 3, array( 34, 33, 33 ) );
+    }
+
+    private function template_card_grid( $section, $count = 4 ) {
+        $items = $this->smart_items( $section, $count, array( 'Tone', 'Unity', 'Service', 'Impact' ) );
+        $cards = array();
+
+        foreach ( $items as $item ) {
+            $cards[] = array(
+                $this->html_widget( '<div class="tyese-ai-icon-dot"></div>' ),
+                $this->widget( 'heading', array( 'title' => $item['title'], 'header_size' => 'h3' ) ),
+                $this->widget( 'text-editor', array( 'editor' => wpautop( $item['text'] ) ) ),
+            );
+        }
+
+        return $this->section_with_intro_grid( $section, $cards, 'platform', min( 4, $count ), array_fill( 0, min( 4, $count ), floor( 100 / min( 4, $count ) ) ) );
+    }
+
+    private function template_content_band( $section, $index ) {
+        $text = array(
+            $this->widget( 'heading', array( 'title' => $section['headline'], 'header_size' => 'h2' ) ),
+            $this->widget( 'text-editor', array( 'editor' => wpautop( $section['body'] ) ) ),
+        );
+        $visual = array( $this->image_placeholder_widget( $section['image_hint'] ?: $section['headline'] ) );
+        $columns = 0 === $index % 2 ? array( $text, $visual ) : array( $visual, $text );
+
+        return $this->section(
+            array( 50, 50 ),
+            $columns,
+            array(
+                'css_id'           => sanitize_title( $section['headline'] ),
+                'background_color' => '#ffffff',
+                'padding'          => array( 64, 42, 64, 42 ),
+            )
+        );
+    }
+
+    private function template_cta( $section ) {
+        $content = array(
+            $this->widget( 'heading', array( 'title' => $section['headline'] ?: __( 'Ready to Get Involved?', 'tyese-aisite' ), 'header_size' => 'h2' ) ),
+            $this->widget( 'text-editor', array( 'editor' => wpautop( $section['body'] ) ) ),
+            $this->widget( 'button', array( 'text' => $section['cta_text'] ?: __( 'Volunteer Now', 'tyese-aisite' ), 'link' => array( 'url' => $section['cta_url'] ?: '#contact' ) ) ),
+        );
+
+        return $this->section(
+            array( 100 ),
+            array( $content ),
+            array(
+                'css_id'           => 'contact',
+                'css_classes'      => 'tyese-ai-cta',
+                'background_color' => $this->brand['primary'],
+                'text_color'       => '#ffffff',
+                'padding'          => array( 54, 42, 54, 42 ),
+            )
+        );
+    }
+
+    private function template_footer( $site_name ) {
+        return $this->section(
+            array( 65, 35 ),
+            array(
+                array(
+                    $this->widget( 'heading', array( 'title' => $site_name, 'header_size' => 'h4' ) ),
+                    $this->widget( 'text-editor', array( 'editor' => wpautop( __( 'Built for clear communication, service, and community action.', 'tyese-aisite' ) ) ) ),
+                ),
+                array(
+                    $this->widget( 'text-editor', array( 'editor' => wpautop( __( 'Contact: info@example.com', 'tyese-aisite' ) ) ) ),
+                ),
+            ),
+            array(
+                'css_classes'      => 'tyese-ai-footer',
+                'background_color' => $this->brand['dark'],
+                'text_color'       => '#ffffff',
+                'padding'          => array( 34, 42, 34, 42 ),
+            )
+        );
+    }
+
+    private function section_with_intro_grid( $section, $cards, $anchor, $columns_count, $column_sizes ) {
+        $elements = array(
+            $this->section(
+                array( 100 ),
+                array(
+                    array(
+                        $this->widget( 'heading', array( 'title' => $section['headline'], 'header_size' => 'h2' ) ),
+                        $this->widget( 'text-editor', array( 'editor' => wpautop( $section['body'] ) ) ),
+                    ),
+                ),
+                array(
+                    'css_id'           => $anchor,
+                    'background_color' => '#ffffff',
+                    'padding'          => array( 64, 42, 18, 42 ),
+                )
+            ),
+        );
+
+        $elements[] = $this->section(
+            $column_sizes,
+            $cards,
+            array(
+                'css_classes'      => 'tyese-ai-grid tyese-ai-grid-' . absint( $columns_count ),
+                'background_color' => '#ffffff',
+                'padding'          => array( 8, 42, 64, 42 ),
+            )
+        );
+
+        return $this->section_wrapper( $elements );
+    }
+
+    private function section_wrapper( $sections ) {
+        if ( 1 === count( $sections ) ) {
+            return $sections[0];
+        }
+
+        return array(
+            'id'       => $this->element_id(),
+            'elType'   => 'section',
+            'settings' => array(
+                'layout'      => 'full_width',
+                'gap'         => 'no',
+                'css_classes' => 'tyese-ai-section-group',
+            ),
+            'elements' => array(
+                array(
+                    'id'       => $this->element_id(),
+                    'elType'   => 'column',
+                    'settings' => array( '_column_size' => 100 ),
+                    'elements' => $sections,
+                ),
+            ),
+        );
+    }
+
+    private function section( $sizes, $columns, $settings = array() ) {
+        $section_settings = array(
+            'layout'      => 'full_width',
+            'content_width' => array( 'unit' => 'px', 'size' => 1180 ),
+            'gap'         => 'extended',
+            'css_id'      => $settings['css_id'] ?? '',
+            'css_classes' => $settings['css_classes'] ?? '',
+            'padding'     => $this->dimensions( $settings['padding'] ?? array( 50, 30, 50, 30 ) ),
+        );
+
+        if ( ! empty( $settings['background_color'] ) ) {
+            $section_settings['background_background'] = 'classic';
+            $section_settings['background_color']      = $settings['background_color'];
+        }
+
+        if ( ! empty( $settings['sticky'] ) ) {
+            $section_settings['sticky'] = $settings['sticky'];
+        }
+
+        if ( ! empty( $settings['z_index'] ) ) {
+            $section_settings['z_index'] = absint( $settings['z_index'] );
+        }
+
+        if ( ! empty( $settings['box_shadow'] ) ) {
+            $section_settings['box_shadow_box_shadow_type'] = 'yes';
+            $section_settings['box_shadow_box_shadow'] = array(
+                'horizontal' => 0,
+                'vertical'   => 8,
+                'blur'       => 24,
+                'spread'     => 0,
+                'color'      => 'rgba(15, 23, 42, 0.10)',
+            );
+        }
+
+        $elements = array();
+        foreach ( array_values( $columns ) as $index => $widgets ) {
+            $elements[] = array(
+                'id'       => $this->element_id(),
+                'elType'   => 'column',
+                'settings' => array(
+                    '_column_size' => $sizes[ $index ] ?? floor( 100 / max( 1, count( $columns ) ) ),
+                    'content_position' => 'center',
+                    'space_between_widgets' => 14,
+                    'padding' => $this->dimensions( array( 10, 10, 10, 10 ) ),
+                ),
+                'elements' => $widgets,
+            );
+        }
+
+        return array(
+            'id'       => $this->element_id(),
+            'elType'   => 'section',
+            'settings' => $section_settings,
+            'elements' => $elements,
+        );
+    }
+
+    private function widget( $type, $settings ) {
+        return array(
+            'id'         => $this->element_id(),
+            'elType'     => 'widget',
+            'widgetType' => $type,
+            'settings'   => $settings,
+            'elements'   => array(),
+        );
+    }
+
+    private function html_widget( $html ) {
+        return $this->widget( 'html', array( 'html' => $html ) );
+    }
+
+    private function image_placeholder_widget( $label ) {
+        $safe_label = esc_html( wp_trim_words( wp_strip_all_tags( $label ?: __( 'Campaign image', 'tyese-aisite' ) ), 8, '' ) );
+        $html = '<div class="tyese-ai-image-slot" style="min-height:320px;display:grid;place-items:center;border-radius:18px;background:linear-gradient(135deg,#e2e8f0,#f8fafc);border:1px solid #cbd5e1;color:#334155;text-align:center;padding:24px;"><div><strong>' . $safe_label . '</strong><br><span>Replace with a campaign photo in Elementor</span></div></div>';
+        return $this->html_widget( $html );
+    }
+
+    private function nav_html( $items ) {
+        $links = array();
+        foreach ( $items as $item ) {
+            $links[] = '<a href="#' . esc_attr( $item['anchor'] ) . '" style="color:inherit;text-decoration:none;font-weight:700;">' . esc_html( $item['label'] ) . '</a>';
+        }
+
+        return '<nav class="tyese-ai-nav" style="display:flex;gap:22px;justify-content:center;align-items:center;flex-wrap:wrap;">' . implode( '', $links ) . '</nav>';
+    }
+
+    private function nav_items_from_sections( $sections ) {
+        $items = array();
+        foreach ( $sections as $section ) {
+            $type = $this->section_type( $section );
+            if ( in_array( $type, array( 'hero' ), true ) ) {
+                continue;
+            }
+
+            $label = $section['headline'] ?: ucwords( $type );
+            $items[] = array(
+                'label'  => wp_trim_words( $label, 3, '' ),
+                'anchor' => sanitize_title( in_array( $type, array( 'team', 'staff' ), true ) ? 'team' : ( in_array( $type, array( 'platform', 'pillars', 'features' ), true ) ? 'platform' : $label ) ),
+            );
+
+            if ( count( $items ) >= 5 ) {
+                break;
+            }
+        }
+
+        if ( empty( $items ) ) {
+            $items = array(
+                array( 'label' => __( 'Platform', 'tyese-aisite' ), 'anchor' => 'platform' ),
+                array( 'label' => __( 'Team', 'tyese-aisite' ), 'anchor' => 'team' ),
+                array( 'label' => __( 'Contact', 'tyese-aisite' ), 'anchor' => 'contact' ),
+            );
+        }
+
+        return $items;
+    }
+
+    private function smart_items( $section, $count, $fallback_titles ) {
+        $items = array();
+        foreach ( $section['widgets'] ?? array() as $widget ) {
+            foreach ( $widget['settings']['items'] ?? array() as $item ) {
+                if ( is_array( $item ) ) {
+                    $items[] = array(
+                        'title' => sanitize_text_field( $item['item_title'] ?? $item['title'] ?? '' ),
+                        'text'  => sanitize_textarea_field( $item['item_text'] ?? $item['text'] ?? '' ),
+                    );
+                }
+            }
+        }
+
+        if ( empty( $items ) ) {
+            $sentences = preg_split( '/(?<=[.!?])\s+/', wp_strip_all_tags( $section['body'] ?? '' ) );
+            foreach ( array_slice( (array) $fallback_titles, 0, $count ) as $index => $title ) {
+                $items[] = array(
+                    'title' => $title,
+                    'text'  => $sentences[ $index ] ?? sprintf( __( '%s is a focused priority for this site.', 'tyese-aisite' ), $title ),
+                );
+            }
+        }
+
+        return array_slice( $items, 0, $count );
+    }
+
+    private function normalize_sections( $sections ) {
+        $clean = array();
+        $seen  = array();
+
+        foreach ( (array) $sections as $section ) {
+            $key = sanitize_key( ( $section['type'] ?? '' ) . '-' . ( $section['headline'] ?? '' ) );
+            if ( isset( $seen[ $key ] ) ) {
+                $this->warnings[] = sprintf( __( 'Skipped duplicate section: %s', 'tyese-aisite' ), $section['headline'] ?? $section['type'] ?? 'section' );
+                continue;
+            }
+
+            $seen[ $key ] = true;
+            $clean[] = array(
+                'type'       => sanitize_key( $section['type'] ?? 'content' ),
+                'headline'   => sanitize_text_field( $section['headline'] ?? '' ),
+                'body'       => wp_kses_post( $section['body'] ?? '' ),
+                'cta_text'   => sanitize_text_field( $section['cta_text'] ?? '' ),
+                'cta_url'    => esc_url_raw( $section['cta_url'] ?? '' ),
+                'image_hint' => sanitize_text_field( $section['image_hint'] ?? '' ),
+                'widgets'    => is_array( $section['widgets'] ?? null ) ? $section['widgets'] : array(),
+            );
+        }
+
+        return $clean;
+    }
+
+    private function section_type( $section ) {
+        $haystack = strtolower( ( $section['type'] ?? '' ) . ' ' . ( $section['headline'] ?? '' ) );
+        if ( false !== strpos( $haystack, 'hero' ) || false !== strpos( $haystack, 'tone' ) ) {
+            return 'hero';
+        }
+        if ( false !== strpos( $haystack, 'team' ) || false !== strpos( $haystack, 'candidate' ) || false !== strpos( $haystack, 'staff' ) ) {
+            return 'team';
+        }
+        if ( false !== strpos( $haystack, 'platform' ) || false !== strpos( $haystack, 'pillar' ) || false !== strpos( $haystack, 'why' ) ) {
+            return 'platform';
+        }
+        if ( false !== strpos( $haystack, 'contact' ) || false !== strpos( $haystack, 'volunteer' ) || false !== strpos( $haystack, 'involved' ) ) {
+            return 'cta';
+        }
+
+        return sanitize_key( $section['type'] ?? 'content' );
+    }
+
+    private function validate_page_elements( $elements ) {
+        $warnings = array();
+        $json = wp_json_encode( $elements );
+
+        if ( false === strpos( $json, 'tyese-ai-header' ) ) {
+            $warnings[] = __( 'No generated header was found.', 'tyese-aisite' );
+        }
+
+        if ( substr_count( $json, 'Choose an image' ) > 0 ) {
+            $warnings[] = __( 'Default Elementor image placeholders were detected.', 'tyese-aisite' );
+        }
+
+        if ( substr_count( $json, 'widgetType' ) < 4 ) {
+            $warnings[] = __( 'The generated page has too few widgets to feel complete.', 'tyese-aisite' );
+        }
+
+        $this->warnings = array_merge( $this->warnings, $warnings );
+        return $warnings;
+    }
+
+    private function create_menu( $site_name, $created_pages ) {
+        $menu_name = sanitize_text_field( $site_name ?: 'Tyese aiSite' ) . ' Menu';
+        $menu_id   = wp_create_nav_menu( $menu_name );
+
+        if ( is_wp_error( $menu_id ) ) {
+            $existing = wp_get_nav_menu_object( $menu_name );
+            $menu_id = $existing ? $existing->term_id : 0;
+        }
+
+        if ( ! $menu_id ) {
+            $this->warnings[] = __( 'Could not create a WordPress navigation menu.', 'tyese-aisite' );
+            return;
+        }
+
+        foreach ( array_slice( $created_pages, 0, 7 ) as $page ) {
+            wp_update_nav_menu_item(
+                $menu_id,
+                0,
+                array(
+                    'menu-item-title'     => $page['title'],
+                    'menu-item-object'    => 'page',
+                    'menu-item-object-id' => absint( $page['id'] ),
+                    'menu-item-type'      => 'post_type',
+                    'menu-item-status'    => 'publish',
+                )
+            );
+        }
+
+        $locations = get_registered_nav_menus();
+        if ( ! empty( $locations ) ) {
+            $mods = get_theme_mod( 'nav_menu_locations', array() );
+            $first_location = array_key_first( $locations );
+            $mods[ $first_location ] = $menu_id;
+            set_theme_mod( 'nav_menu_locations', $mods );
+        }
+    }
+
+    private function brand_tokens( $brand ) {
+        $colors = array_values( array_filter( (array) ( $brand['colors'] ?? array() ) ) );
+        return array(
+            'primary' => sanitize_hex_color( $colors[0] ?? '#123c7c' ) ?: '#123c7c',
+            'accent'  => sanitize_hex_color( $colors[1] ?? '#b81d24' ) ?: '#b81d24',
+            'dark'    => sanitize_hex_color( $colors[2] ?? '#172033' ) ?: '#172033',
+            'soft'    => '#f8fafc',
+        );
+    }
+
+    private function page_settings() {
+        return array(
+            'background_background' => 'classic',
+            'background_color'      => '#ffffff',
+            'hide_title'            => 'yes',
+        );
+    }
+
+    private function dimensions( $values ) {
+        $values = array_pad( array_map( 'absint', (array) $values ), 4, 0 );
+        return array(
+            'unit'     => 'px',
+            'top'      => $values[0],
+            'right'    => $values[1],
+            'bottom'   => $values[2],
+            'left'     => $values[3],
+            'isLinked' => false,
+        );
     }
 
     private function prepare_post_for_page( $page, $target_id, $args ) {
@@ -126,124 +664,6 @@ final class Tyese_AiSite_Elementor_Builder {
         $allowed  = array( 'elementor_canvas', 'elementor_header_footer', 'default' );
 
         return in_array( $template, $allowed, true ) ? $template : 'elementor_canvas';
-    }
-
-    private function page_elements( $page ) {
-        $elements = array();
-
-        foreach ( $page['sections'] ?? array() as $section ) {
-            $elements[] = array(
-                'id'       => $this->element_id(),
-                'elType'   => 'section',
-                'settings' => array(
-                    'layout' => 'full_width',
-                    'gap'    => 'no',
-                ),
-                'elements' => array(
-                    array(
-                        'id'       => $this->element_id(),
-                        'elType'   => 'column',
-                        'settings' => array( '_column_size' => 100 ),
-                        'elements' => $this->section_widgets( $section ),
-                    ),
-                ),
-            );
-        }
-
-        return $elements;
-    }
-
-    private function section_widgets( $section ) {
-        $widgets = array();
-        $requested = $section['widgets'] ?? array();
-
-        if ( empty( $requested ) ) {
-            $requested = array(
-                array( 'widget' => 'heading', 'settings' => array() ),
-                array( 'widget' => 'text-editor', 'settings' => array() ),
-            );
-        }
-
-        foreach ( $requested as $widget ) {
-            $widgets[] = $this->widget_element( $widget['widget'], $section, $widget['settings'] ?? array() );
-        }
-
-        return $widgets;
-    }
-
-    private function widget_element( $widget_type, $section, $settings ) {
-        $widget_type = sanitize_key( $widget_type );
-        $settings    = $this->settings_for_widget( $widget_type, $section, $settings );
-
-        return array(
-            'id'         => $this->element_id(),
-            'elType'     => 'widget',
-            'widgetType' => $widget_type,
-            'settings'   => $settings,
-            'elements'   => array(),
-        );
-    }
-
-    private function settings_for_widget( $widget_type, $section, $settings ) {
-        $headline = $section['headline'] ?? '';
-        $body     = $section['body'] ?? '';
-        $cta_text = $section['cta_text'] ?? '';
-        $cta_url  = $section['cta_url'] ?? '';
-
-        if ( 0 === strpos( $widget_type, 'tyese_' ) ) {
-            return array_merge(
-                array(
-                    'title'       => $headline,
-                    'subtitle'    => ucwords( str_replace( '_', ' ', $section['type'] ?? 'section' ) ),
-                    'content'     => $body,
-                    'button_text' => $cta_text ?: __( 'Learn More', 'tyese-aisite' ),
-                    'link'        => array( 'url' => $cta_url ?: '#' ),
-                    'items'       => $this->items_from_body( $body ),
-                ),
-                (array) $settings
-            );
-        }
-
-        switch ( $widget_type ) {
-            case 'heading':
-                return array_merge( array( 'title' => $headline, 'header_size' => 'h2' ), (array) $settings );
-            case 'text-editor':
-                return array_merge( array( 'editor' => wpautop( $body ) ), (array) $settings );
-            case 'button':
-                return array_merge( array( 'text' => $cta_text ?: __( 'Learn More', 'tyese-aisite' ), 'link' => array( 'url' => $cta_url ?: '#' ) ), (array) $settings );
-            case 'icon-list':
-                return array_merge( array( 'icon_list' => $this->icon_list_from_body( $body ) ), (array) $settings );
-            case 'html':
-                return array_merge( array( 'html' => '<div>' . esc_html( $headline ) . '</div>' ), (array) $settings );
-            default:
-                return array_merge( array( 'title' => $headline, 'editor' => wpautop( $body ) ), (array) $settings );
-        }
-    }
-
-    private function items_from_body( $body ) {
-        $sentences = preg_split( '/(?<=[.!?])\s+/', wp_strip_all_tags( $body ) );
-        $items     = array();
-
-        foreach ( array_slice( array_filter( $sentences ), 0, 4 ) as $sentence ) {
-            $items[] = array(
-                'item_title' => wp_trim_words( $sentence, 5, '' ),
-                'item_text'  => $sentence,
-            );
-        }
-
-        return $items;
-    }
-
-    private function icon_list_from_body( $body ) {
-        $items = array();
-        foreach ( $this->items_from_body( $body ) as $item ) {
-            $items[] = array(
-                'text'          => $item['item_text'],
-                'selected_icon' => array( 'value' => 'fas fa-check', 'library' => 'fa-solid' ),
-            );
-        }
-
-        return $items;
     }
 
     private function element_id() {

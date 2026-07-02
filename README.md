@@ -48,6 +48,8 @@ Version 0.2.1 fixes the OpenAI structured-output schema so empty widget settings
 
 Version 0.2.2 queues site generation as a WordPress background build so nginx does not time out while OpenAI is generating the blueprint.
 
+Version 0.3.0 adds a template-based Elementor layout engine with generated headers, section grids, CTAs, footer, WordPress menu creation, controlled image placeholders, and build validation warnings.
+
 Next planned upgrades:
 
 - Follow-up edit commands for existing pages.

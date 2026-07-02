@@ -309,7 +309,9 @@ final class Tyese_AiSite_Admin {
         if ( is_wp_error( $blueprint ) ) {
             $error_message = $blueprint->get_error_message();
             $blueprint = ( new Tyese_AiSite_Blueprint() )->fallback_blueprint();
-            $created   = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint, $builder_args ) : array();
+            $builder   = new Tyese_AiSite_Elementor_Builder();
+            $created   = $build_pages ? $builder->build( $blueprint, $builder_args ) : array();
+            $warnings  = $builder->get_warnings();
 
             update_option( self::LAST_BLUEPRINT, $blueprint, false );
             update_option( self::LAST_CREATED, $created, false );
@@ -323,6 +325,7 @@ final class Tyese_AiSite_Admin {
                     'created_count' => count( $created ),
                     'build_mode'    => $builder_args['mode'] ?? 'create_new',
                     'page_template' => $builder_args['page_template'] ?? 'elementor_canvas',
+                    'warnings'      => $warnings,
                     'finished_at'   => current_time( 'mysql' ),
                 ),
                 false
@@ -331,7 +334,9 @@ final class Tyese_AiSite_Admin {
         }
 
         update_option( self::LAST_BLUEPRINT, $blueprint, false );
-        $created = $build_pages ? ( new Tyese_AiSite_Elementor_Builder() )->build( $blueprint, $builder_args ) : array();
+        $builder = new Tyese_AiSite_Elementor_Builder();
+        $created = $build_pages ? $builder->build( $blueprint, $builder_args ) : array();
+        $warnings = $builder->get_warnings();
         update_option( self::LAST_CREATED, $created, false );
         update_option(
             self::LAST_STATUS,
@@ -343,6 +348,7 @@ final class Tyese_AiSite_Admin {
                 'created_count' => count( $created ),
                 'build_mode'    => $builder_args['mode'] ?? 'create_new',
                 'page_template' => $builder_args['page_template'] ?? 'elementor_canvas',
+                'warnings'      => $warnings,
                 'finished_at'   => current_time( 'mysql' ),
             ),
             false
@@ -414,6 +420,14 @@ final class Tyese_AiSite_Admin {
 
         if ( ! empty( $status['error'] ) ) {
             echo '<div class="tyese-aisite-error"><strong>' . esc_html__( 'OpenAI error:', 'tyese-aisite' ) . '</strong><br>' . esc_html( $status['error'] ) . '</div>';
+        }
+
+        if ( ! empty( $status['warnings'] ) && is_array( $status['warnings'] ) ) {
+            echo '<div class="tyese-aisite-warning"><strong>' . esc_html__( 'Build warnings:', 'tyese-aisite' ) . '</strong><ul>';
+            foreach ( $status['warnings'] as $warning ) {
+                echo '<li>' . esc_html( $warning ) . '</li>';
+            }
+            echo '</ul></div>';
         }
 
         if ( ! empty( $blueprint['pages'] ) ) {
