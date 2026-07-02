@@ -16,8 +16,10 @@ final class Tyese_AiSite_Admin {
 
     public function __construct() {
         add_action( 'admin_menu', array( $this, 'menu' ) );
+        add_action( 'admin_init', array( $this, 'maybe_repair_legacy_pages' ) );
         add_action( 'admin_post_tyese_aisite_save_settings', array( $this, 'save_settings' ) );
         add_action( 'admin_post_tyese_aisite_generate', array( $this, 'generate' ) );
+        add_action( 'admin_post_tyese_aisite_repair_last_build', array( $this, 'repair_last_build' ) );
         add_action( 'tyese_aisite_run_build', array( $this, 'run_queued_build' ) );
     }
 
@@ -54,7 +56,7 @@ final class Tyese_AiSite_Admin {
             <div class="tyese-aisite-layout">
                 <section class="tyese-aisite-panel">
                     <h2><?php esc_html_e( 'AI Builder', 'tyese-aisite' ); ?></h2>
-                    <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                    <form method="post" enctype="multipart/form-data" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                         <?php wp_nonce_field( 'tyese_aisite_generate' ); ?>
                         <input type="hidden" name="action" value="tyese_aisite_generate">
 
@@ -67,6 +69,12 @@ final class Tyese_AiSite_Admin {
                             <span><?php esc_html_e( 'Reference URL', 'tyese-aisite' ); ?></span>
                             <input type="url" name="reference_url" placeholder="https://example.com">
                             <small><?php esc_html_e( 'Used only for layout inspiration. Tyese aiSite will not copy protected branding, text, images, or IP.', 'tyese-aisite' ); ?></small>
+                        </label>
+
+                        <label>
+                            <span><?php esc_html_e( 'Reference Design Screenshot', 'tyese-aisite' ); ?></span>
+                            <input type="file" name="reference_image" accept="image/png,image/jpeg,image/webp">
+                            <small><?php esc_html_e( 'Optional. Upload a homepage or page design image so Tyese aiSite can follow its layout, spacing, hierarchy, and image ratios while keeping the result editable in Elementor.', 'tyese-aisite' ); ?></small>
                         </label>
 
                         <label>
@@ -166,6 +174,11 @@ final class Tyese_AiSite_Admin {
                 <section class="tyese-aisite-panel tyese-aisite-wide">
                     <h2><?php esc_html_e( 'Last Build', 'tyese-aisite' ); ?></h2>
                     <?php if ( ! empty( $created ) ) : ?>
+                        <form class="tyese-aisite-inline-form" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                            <?php wp_nonce_field( 'tyese_aisite_repair_last_build' ); ?>
+                            <input type="hidden" name="action" value="tyese_aisite_repair_last_build">
+                            <button type="submit" class="button"><?php esc_html_e( 'Repair Last Generated Pages', 'tyese-aisite' ); ?></button>
+                        </form>
                         <ul class="tyese-aisite-created">
                             <?php foreach ( $created as $page ) : ?>
                                 <li>
@@ -215,6 +228,7 @@ final class Tyese_AiSite_Admin {
         $prompt        = sanitize_textarea_field( wp_unslash( $_POST['prompt'] ?? '' ) );
         $reference_url = esc_url_raw( wp_unslash( $_POST['reference_url'] ?? '' ) );
         $brand_context = sanitize_textarea_field( wp_unslash( $_POST['brand_context'] ?? $settings['brand_context'] ?? '' ) );
+        $reference_image_id = $this->handle_reference_image_upload();
         $build_pages   = ! empty( $_POST['build_pages'] );
         $build_mode    = sanitize_key( wp_unslash( $_POST['build_mode'] ?? 'create_new' ) );
         $page_template = sanitize_key( wp_unslash( $_POST['page_template'] ?? 'elementor_canvas' ) );
@@ -236,6 +250,7 @@ final class Tyese_AiSite_Admin {
         $job = array(
             'prompt'        => $prompt,
             'reference_url' => $reference_url,
+            'reference_image_id' => $reference_image_id,
             'brand_context' => $brand_context,
             'build_pages'   => $build_pages,
             'builder_args'  => $builder_args,
@@ -274,6 +289,39 @@ final class Tyese_AiSite_Admin {
         exit;
     }
 
+    public function repair_last_build() {
+        if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'tyese_aisite_repair_last_build' ) ) {
+            wp_die( esc_html__( 'You are not allowed to repair generated pages.', 'tyese-aisite' ) );
+        }
+
+        $count = $this->repair_generated_pages();
+        wp_safe_redirect( add_query_arg( array( 'tyese_aisite_notice' => 'pages_repaired', 'tyese_aisite_repaired' => $count ), admin_url( 'admin.php?page=tyese-aisite' ) ) );
+        exit;
+    }
+
+    public function maybe_repair_legacy_pages() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $stored_version = get_option( 'tyese_aisite_repair_version', '' );
+        if ( version_compare( (string) $stored_version, TYESE_AISITE_VERSION, '>=' ) ) {
+            return;
+        }
+
+        $count = $this->repair_generated_pages();
+        update_option( 'tyese_aisite_repair_version', TYESE_AISITE_VERSION, false );
+
+        if ( $count > 0 ) {
+            $status = get_option( self::LAST_STATUS, array() );
+            if ( ! is_array( $status ) ) {
+                $status = array();
+            }
+            $status['repair_message'] = sprintf( __( 'Tyese aiSite repaired %d generated Elementor page(s) after the plugin update.', 'tyese-aisite' ), $count );
+            update_option( self::LAST_STATUS, $status, false );
+        }
+    }
+
     public function run_queued_build() {
         $job = get_option( self::PENDING_JOB, array() );
         if ( empty( $job ) || ! is_array( $job ) ) {
@@ -304,8 +352,9 @@ final class Tyese_AiSite_Admin {
     private function execute_build( $client, $widgets, $job ) {
         $build_pages  = ! empty( $job['build_pages'] );
         $builder_args = is_array( $job['builder_args'] ?? null ) ? $job['builder_args'] : array();
+        $reference_image = ! empty( $job['reference_image_id'] ) ? $this->reference_image_data_url( absint( $job['reference_image_id'] ) ) : '';
 
-        $blueprint = $client->generate_blueprint( $job['prompt'] ?? '', $job['reference_url'] ?? '', $widgets->names_for_prompt(), $job['brand_context'] ?? '' );
+        $blueprint = $client->generate_blueprint( $job['prompt'] ?? '', $job['reference_url'] ?? '', $widgets->names_for_prompt(), $job['brand_context'] ?? '', $reference_image );
         if ( is_wp_error( $blueprint ) ) {
             $error_message = $blueprint->get_error_message();
             $blueprint = ( new Tyese_AiSite_Blueprint() )->fallback_blueprint();
@@ -377,6 +426,7 @@ final class Tyese_AiSite_Admin {
             'site_generated' => __( 'Site draft generated. Review the draft pages below before publishing.', 'tyese-aisite' ),
             'fallback_used'  => __( 'OpenAI could not generate a blueprint. Tyese aiSite finished and used the safe fallback draft instead; see Build Status below for the real error.', 'tyese-aisite' ),
             'failed'         => __( 'Tyese aiSite could not generate a blueprint.', 'tyese-aisite' ),
+            'pages_repaired' => sprintf( __( 'Tyese aiSite repaired %d generated page(s).', 'tyese-aisite' ), absint( $_GET['tyese_aisite_repaired'] ?? 0 ) ),
         );
 
         if ( isset( $messages[ $notice ] ) ) {
@@ -430,6 +480,10 @@ final class Tyese_AiSite_Admin {
             echo '</ul></div>';
         }
 
+        if ( ! empty( $status['repair_message'] ) ) {
+            echo '<div class="tyese-aisite-warning">' . esc_html( $status['repair_message'] ) . '</div>';
+        }
+
         if ( ! empty( $blueprint['pages'] ) ) {
             echo '<p><strong>' . esc_html__( 'Blueprint pages:', 'tyese-aisite' ) . '</strong> ' . esc_html( implode( ', ', wp_list_pluck( $blueprint['pages'], 'title' ) ) ) . '</p>';
         }
@@ -460,5 +514,151 @@ final class Tyese_AiSite_Admin {
         echo '<div><strong>' . esc_html__( 'Menus', 'tyese-aisite' ) . '</strong><span>' . esc_html( (string) count( $scan['menus'] ) ) . '</span></div>';
         echo '</div>';
         echo '<p class="tyese-aisite-muted">' . esc_html__( 'When the installed theme does not match the requested design direction, choose Elementor Canvas or Elementor Full Width so the generated page controls more of the layout.', 'tyese-aisite' ) . '</p>';
+    }
+
+    private function handle_reference_image_upload() {
+        if ( empty( $_FILES['reference_image']['name'] ) || ! empty( $_FILES['reference_image']['error'] ) ) {
+            return 0;
+        }
+
+        $file  = $_FILES['reference_image'];
+        $check = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
+        $mime  = $check['type'] ?? '';
+
+        if ( ! in_array( $mime, array( 'image/jpeg', 'image/png', 'image/webp' ), true ) ) {
+            return 0;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $attachment_id = media_handle_upload( 'reference_image', 0 );
+        return is_wp_error( $attachment_id ) ? 0 : absint( $attachment_id );
+    }
+
+    private function reference_image_data_url( $attachment_id ) {
+        $path = get_attached_file( $attachment_id );
+        if ( ! $path || ! file_exists( $path ) || filesize( $path ) > 8 * MB_IN_BYTES ) {
+            return '';
+        }
+
+        $mime = get_post_mime_type( $attachment_id );
+        if ( ! in_array( $mime, array( 'image/jpeg', 'image/png', 'image/webp' ), true ) ) {
+            return '';
+        }
+
+        $contents = file_get_contents( $path );
+        if ( false === $contents ) {
+            return '';
+        }
+
+        return 'data:' . $mime . ';base64,' . base64_encode( $contents );
+    }
+
+    private function repair_generated_pages() {
+        $ids = array();
+
+        foreach ( (array) get_option( self::LAST_CREATED, array() ) as $page ) {
+            if ( ! empty( $page['id'] ) ) {
+                $ids[] = absint( $page['id'] );
+            }
+        }
+
+        $query = new WP_Query(
+            array(
+                'post_type'      => 'page',
+                'post_status'    => 'any',
+                'fields'         => 'ids',
+                'posts_per_page' => 100,
+                'meta_query'     => array(
+                    array(
+                        'key'     => '_tyese_aisite_blueprint',
+                        'compare' => 'EXISTS',
+                    ),
+                ),
+            )
+        );
+
+        $ids = array_values( array_unique( array_merge( $ids, array_map( 'absint', $query->posts ) ) ) );
+        $count = 0;
+
+        foreach ( $ids as $post_id ) {
+            if ( $this->repair_elementor_page( $post_id ) ) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function repair_elementor_page( $post_id ) {
+        $raw = get_post_meta( $post_id, '_elementor_data', true );
+        if ( ! $raw ) {
+            return false;
+        }
+
+        $data = json_decode( $raw, true );
+        if ( ! is_array( $data ) ) {
+            $data = json_decode( wp_unslash( $raw ), true );
+        }
+
+        if ( ! is_array( $data ) ) {
+            return false;
+        }
+
+        $changed = false;
+        $data = $this->flatten_legacy_sections( $data, $changed );
+
+        if ( ! $changed ) {
+            return false;
+        }
+
+        update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
+        update_post_meta( $post_id, '_tyese_aisite_repaired_at', current_time( 'mysql' ) );
+        return true;
+    }
+
+    private function flatten_legacy_sections( $elements, &$changed ) {
+        $clean = array();
+
+        foreach ( (array) $elements as $element ) {
+            if ( ! is_array( $element ) ) {
+                continue;
+            }
+
+            if ( 'section' === ( $element['elType'] ?? '' ) && $this->is_section_group_wrapper( $element ) ) {
+                foreach ( $element['elements'][0]['elements'] as $child ) {
+                    if ( is_array( $child ) && 'section' === ( $child['elType'] ?? '' ) ) {
+                        $clean[] = $child;
+                        $changed = true;
+                    }
+                }
+                continue;
+            }
+
+            $clean[] = $element;
+        }
+
+        return $clean;
+    }
+
+    private function is_section_group_wrapper( $element ) {
+        if ( empty( $element['elements'][0] ) || 'column' !== ( $element['elements'][0]['elType'] ?? '' ) ) {
+            return false;
+        }
+
+        $children = $element['elements'][0]['elements'] ?? array();
+        if ( empty( $children ) ) {
+            return false;
+        }
+
+        foreach ( $children as $child ) {
+            if ( is_array( $child ) && 'section' === ( $child['elType'] ?? '' ) ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

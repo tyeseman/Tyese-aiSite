@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Tyese aiSite
  * Description: AI website builder for Elementor that creates editable WordPress pages using Elementor, Tyese widgets, and installed compatible widgets.
- * Version: 0.4.1
+ * Version: 0.4.2
  * Author: Leon C. Tyes
  * Text Domain: tyese-aisite
  * Requires at least: 6.4
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'TYESE_AISITE_VERSION', '0.4.1' );
+define( 'TYESE_AISITE_VERSION', '0.4.2' );
 define( 'TYESE_AISITE_FILE', __FILE__ );
 define( 'TYESE_AISITE_PATH', plugin_dir_path( __FILE__ ) );
 define( 'TYESE_AISITE_URL', plugin_dir_url( __FILE__ ) );

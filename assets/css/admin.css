@@ -141,6 +141,10 @@
   margin: 0;
 }
 
+.tyese-aisite-inline-form {
+  margin: 0 0 14px;
+}
+
 .tyese-aisite-created li {
   display: flex;
   align-items: center;

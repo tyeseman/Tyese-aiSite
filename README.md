@@ -50,7 +50,7 @@ Version 0.2.2 queues site generation as a WordPress background build so nginx do
 
 Version 0.3.0 adds a template-based Elementor layout engine with generated headers, section grids, CTAs, footer, WordPress menu creation, controlled image placeholders, and build validation warnings.
 
-Version 0.4.1 keeps universal page-type governance and fixes Elementor body rendering by saving generated intro/grid layouts as valid top-level sections instead of nesting sections inside columns.
+Version 0.4.2 adds reference design screenshot uploads for visual layout guidance, automatic repair for older generated Elementor pages with nested sections, and a manual repair button for the last build.
 
 Next planned upgrades:
 

@@ -20,13 +20,13 @@ final class Tyese_AiSite_OpenAI {
         return '' !== $this->api_key;
     }
 
-    public function generate_blueprint( $prompt, $reference_url, $widget_names, $brand_context = '' ) {
+    public function generate_blueprint( $prompt, $reference_url, $widget_names, $brand_context = '', $reference_image = '' ) {
         if ( ! $this->has_key() ) {
             return new WP_Error( 'tyese_aisite_missing_key', __( 'Add an OpenAI API key before generating an AI blueprint.', 'tyese-aisite' ) );
         }
 
         $schema = ( new Tyese_AiSite_Blueprint() )->schema();
-        $input  = $this->build_input( $prompt, $reference_url, $widget_names, $brand_context );
+        $input  = $this->build_input( $prompt, $reference_url, $widget_names, $brand_context, $reference_image );
 
         $response = wp_remote_post(
             'https://api.openai.com/v1/responses',
@@ -78,9 +78,23 @@ final class Tyese_AiSite_OpenAI {
         return ( new Tyese_AiSite_Blueprint() )->normalize( $decoded );
     }
 
-    private function build_input( $prompt, $reference_url, $widget_names, $brand_context ) {
+    private function build_input( $prompt, $reference_url, $widget_names, $brand_context, $reference_image = '' ) {
         $available_widgets = implode( "\n", array_map( 'sanitize_text_field', (array) $widget_names ) );
         $reference_note    = $reference_url ? 'Reference URL for layout inspiration only: ' . esc_url_raw( $reference_url ) : 'No reference URL provided.';
+        $user_content      = array(
+            array(
+                'type' => 'input_text',
+                'text' => "User instructions:\n" . wp_strip_all_tags( $prompt ) . "\n\nBrand context:\n" . wp_strip_all_tags( $brand_context ) . "\n\n" . $reference_note . "\n\nAvailable widgets:\n" . $available_widgets,
+            ),
+        );
+
+        if ( $reference_image ) {
+            $user_content[] = array(
+                'type'      => 'input_image',
+                'image_url' => $this->safe_image_url( $reference_image ),
+                'detail'    => 'high',
+            );
+        }
 
         return array(
             array(
@@ -88,20 +102,25 @@ final class Tyese_AiSite_OpenAI {
                 'content' => array(
                     array(
                         'type' => 'input_text',
-                        'text' => 'You are Tyese aiSite, a WordPress Elementor site-planning assistant. Return only a complete JSON blueprint that matches the provided schema. Build a real responsive website structure, not a repeated content list. Choose page_type from: home, about, services, team, platform, product, pricing, portfolio, news, events, contact, landing, generic. Prefer these section types when relevant: hero, about, services, features, platform, team, testimonials, pricing, portfolio, news, events, contact, cta. Do not repeat the same headline across multiple sections. Every page should have a clear hero and logical section order. The renderer will enforce navigation, spacing, image ratios, max widths, and mobile stacking, so your job is to provide clean content for approved slots. Build with available Elementor and Tyese widgets. Do not copy protected brands, logos, proprietary text, unique images, trademarks, or IP from reference sites. Use references only for structural constraints such as hero balance, navigation weight, density, rhythm, and visual hierarchy. Prefer editable Elementor widgets over HTML. Use the HTML widget only when no safer widget exists.',
+                        'text' => 'You are Tyese aiSite, a WordPress Elementor site-planning assistant. Return only a complete JSON blueprint that matches the provided schema. Build a real responsive website structure, not a repeated content list. Choose page_type from: home, about, services, team, platform, product, pricing, portfolio, news, events, contact, landing, generic. Prefer these section types when relevant: hero, about, services, features, platform, team, testimonials, pricing, portfolio, news, events, contact, cta. Do not repeat the same headline across multiple sections. Every page should have a clear hero and logical section order. The renderer will enforce navigation, spacing, image ratios, max widths, and mobile stacking, so your job is to provide clean content for approved slots. Build with available Elementor and Tyese widgets. Do not copy protected brands, logos, proprietary text, unique images, trademarks, or IP from reference sites. Use references and uploaded screenshots only for structural constraints such as hero balance, navigation weight, density, rhythm, section order, visual hierarchy, image ratios, and responsive layout direction. Do not recreate protected logos, exact proprietary copy, or unique artwork from a screenshot. Prefer editable Elementor widgets over HTML. Use the HTML widget only when no safer widget exists.',
                     ),
                 ),
             ),
             array(
                 'role'    => 'user',
-                'content' => array(
-                    array(
-                        'type' => 'input_text',
-                        'text' => "User instructions:\n" . wp_strip_all_tags( $prompt ) . "\n\nBrand context:\n" . wp_strip_all_tags( $brand_context ) . "\n\n" . $reference_note . "\n\nAvailable widgets:\n" . $available_widgets,
-                    ),
-                ),
+                'content' => $user_content,
             ),
         );
+    }
+
+    private function safe_image_url( $image_url ) {
+        $image_url = trim( (string) $image_url );
+
+        if ( preg_match( '#^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$#', $image_url ) ) {
+            return $image_url;
+        }
+
+        return esc_url_raw( $image_url );
     }
 
     private function extract_output_text( $body ) {
