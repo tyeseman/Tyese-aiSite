@@ -609,14 +609,122 @@ final class Tyese_AiSite_Admin {
 
         $changed = false;
         $data = $this->flatten_legacy_sections( $data, $changed );
+        $data = $this->sanitize_legacy_elementor_elements( $data, $changed );
 
         if ( ! $changed ) {
             return false;
         }
 
         update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
+        update_post_meta(
+            $post_id,
+            '_elementor_page_settings',
+            wp_slash(
+                wp_json_encode(
+                    array(
+                        'background_background' => 'classic',
+                        'background_color'      => '#ffffff',
+                        'hide_title'            => 'yes',
+                    )
+                )
+            )
+        );
         update_post_meta( $post_id, '_tyese_aisite_repaired_at', current_time( 'mysql' ) );
         return true;
+    }
+
+    private function sanitize_legacy_elementor_elements( $elements, &$changed ) {
+        $clean = array();
+
+        foreach ( (array) $elements as $element ) {
+            if ( ! is_array( $element ) || empty( $element['elType'] ) ) {
+                continue;
+            }
+
+            if ( ! empty( $element['elements'] ) ) {
+                $element['elements'] = $this->sanitize_legacy_elementor_elements( $element['elements'], $changed );
+            }
+
+            if ( 'section' === $element['elType'] ) {
+                $element['settings'] = $this->safe_section_settings( $element['settings'] ?? array(), $changed );
+            } elseif ( 'column' === $element['elType'] ) {
+                $element['settings'] = $this->safe_column_settings( $element['settings'] ?? array(), $changed );
+            } elseif ( 'widget' === $element['elType'] ) {
+                $element = $this->safe_widget_element( $element, $changed );
+            }
+
+            $clean[] = $element;
+        }
+
+        return $clean;
+    }
+
+    private function safe_section_settings( $settings, &$changed ) {
+        $allowed = array(
+            'layout',
+            'gap',
+            'css_id',
+            'css_classes',
+            'padding',
+            'background_background',
+            'background_color',
+            'z_index',
+            'box_shadow_box_shadow_type',
+            'box_shadow_box_shadow',
+        );
+
+        return $this->filter_settings( $settings, $allowed, $changed );
+    }
+
+    private function safe_column_settings( $settings, &$changed ) {
+        $allowed = array(
+            '_column_size',
+            'content_position',
+            'space_between_widgets',
+            'padding',
+        );
+
+        return $this->filter_settings( $settings, $allowed, $changed );
+    }
+
+    private function filter_settings( $settings, $allowed, &$changed ) {
+        $settings = (array) $settings;
+        $filtered = array_intersect_key( $settings, array_flip( $allowed ) );
+
+        if ( count( $filtered ) !== count( $settings ) ) {
+            $changed = true;
+        }
+
+        return $filtered;
+    }
+
+    private function safe_widget_element( $element, &$changed ) {
+        $widget_type = $element['widgetType'] ?? '';
+
+        if ( 'html' === $widget_type ) {
+            $html = $element['settings']['html'] ?? '';
+            $element['widgetType'] = false !== strpos( $html, '<nav' ) ? 'text-editor' : 'spacer';
+            $element['settings'] = 'text-editor' === $element['widgetType']
+                ? array( 'editor' => wp_kses_post( $html ) )
+                : array( 'space' => array( 'unit' => 'px', 'size' => 240 ) );
+            $changed = true;
+            return $element;
+        }
+
+        if ( 'divider' === $widget_type ) {
+            $element['settings'] = array(
+                'weight' => array( 'unit' => 'px', 'size' => 2 ),
+            );
+            $changed = true;
+            return $element;
+        }
+
+        if ( 'spacer' === $widget_type && empty( $element['settings']['space'] ) ) {
+            $element['settings'] = array( 'space' => array( 'unit' => 'px', 'size' => 240 ) );
+            $changed = true;
+        }
+
+        return $element;
     }
 
     private function flatten_legacy_sections( $elements, &$changed ) {

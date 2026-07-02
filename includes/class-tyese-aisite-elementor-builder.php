@@ -170,7 +170,7 @@ final class Tyese_AiSite_Elementor_Builder {
     private function template_header( $site_name, $sections ) {
         $nav_items = $this->nav_items_from_sections( $sections );
         $left      = array( $this->widget( 'heading', array( 'title' => $site_name, 'header_size' => 'h4' ) ) );
-        $center    = array( $this->html_widget( $this->nav_html( $nav_items ) ) );
+        $center    = array( $this->widget( 'text-editor', array( 'editor' => $this->nav_html( $nav_items ) ) ) );
         $right     = array( $this->widget( 'button', array( 'text' => __( 'Contact', 'tyese-aisite' ), 'link' => array( 'url' => '#contact' ), 'button_type' => 'info' ) ) );
 
         return $this->section(
@@ -180,7 +180,6 @@ final class Tyese_AiSite_Elementor_Builder {
                 'css_classes'      => 'tyese-ai-header',
                 'background_color' => '#ffffff',
                 'padding'          => array( 14, 36, 14, 36 ),
-                'sticky'           => 'top',
                 'z_index'          => 50,
                 'box_shadow'       => true,
             )
@@ -234,7 +233,7 @@ final class Tyese_AiSite_Elementor_Builder {
 
         foreach ( $items as $item ) {
             $cards[] = array(
-                $this->html_widget( '<div class="tyese-ai-icon-dot"></div>' ),
+                $this->widget( 'divider', array( 'weight' => array( 'unit' => 'px', 'size' => 2 ), 'color' => $this->brand['primary'] ) ),
                 $this->widget( 'heading', array( 'title' => $item['title'], 'header_size' => 'h3' ) ),
                 $this->widget( 'text-editor', array( 'editor' => wpautop( $item['text'] ) ) ),
             );
@@ -337,22 +336,15 @@ final class Tyese_AiSite_Elementor_Builder {
     private function section( $sizes, $columns, $settings = array() ) {
         $section_settings = array(
             'layout'      => 'full_width',
-                    'content_width' => array( 'unit' => 'px', 'size' => absint( $this->design['content_width'] ?? 1180 ) ),
             'gap'         => 'extended',
             'css_id'      => $settings['css_id'] ?? '',
             'css_classes' => $settings['css_classes'] ?? '',
             'padding'     => $this->dimensions( $settings['padding'] ?? array( 50, 30, 50, 30 ) ),
-            'padding_tablet' => $this->dimensions( $this->design['section_padding_tablet'] ?? array( 54, 28, 54, 28 ) ),
-            'padding_mobile' => $this->dimensions( $this->design['section_padding_mobile'] ?? array( 42, 18, 42, 18 ) ),
         );
 
         if ( ! empty( $settings['background_color'] ) ) {
             $section_settings['background_background'] = 'classic';
             $section_settings['background_color']      = $settings['background_color'];
-        }
-
-        if ( ! empty( $settings['sticky'] ) ) {
-            $section_settings['sticky'] = $settings['sticky'];
         }
 
         if ( ! empty( $settings['z_index'] ) ) {
@@ -379,12 +371,7 @@ final class Tyese_AiSite_Elementor_Builder {
                     '_column_size' => $sizes[ $index ] ?? floor( 100 / max( 1, count( $columns ) ) ),
                     'content_position' => 'center',
                     'space_between_widgets' => 14,
-                    'space_between_widgets_tablet' => 12,
-                    'space_between_widgets_mobile' => 10,
                     'padding' => $this->dimensions( array( 10, 10, 10, 10 ) ),
-                    'padding_mobile' => $this->dimensions( array( 8, 0, 8, 0 ) ),
-                    '_column_size_tablet' => 100,
-                    '_column_size_mobile' => 100,
                 ),
                 'elements' => $widgets,
             );
@@ -408,16 +395,17 @@ final class Tyese_AiSite_Elementor_Builder {
         );
     }
 
-    private function html_widget( $html ) {
-        return $this->widget( 'html', array( 'html' => $html ) );
-    }
-
     private function image_placeholder_widget( $label, $variant = 'content' ) {
-        $safe_label = esc_html( wp_trim_words( wp_strip_all_tags( $label ?: __( 'Website image', 'tyese-aisite' ) ), 8, '' ) );
-        $ratio = 'portrait' === $variant ? ( $this->design['portrait_image_ratio'] ?? '4 / 5' ) : ( 'hero' === $variant ? ( $this->design['hero_image_ratio'] ?? '4 / 3' ) : ( $this->design['card_image_ratio'] ?? '3 / 2' ) );
         $height = 'hero' === $variant ? 360 : ( 'portrait' === $variant ? 260 : 300 );
-        $html = '<div class="tyese-ai-image-slot tyese-ai-image-' . esc_attr( $variant ) . '" style="aspect-ratio:' . esc_attr( $ratio ) . ';min-height:' . absint( $height ) . 'px;max-height:' . absint( $this->design['image_max_height'] ?? 460 ) . 'px;display:grid;place-items:center;overflow:hidden;border-radius:18px;background:linear-gradient(135deg,#e2e8f0,#f8fafc);border:1px solid #cbd5e1;color:#334155;text-align:center;padding:24px;"><div><strong>' . $safe_label . '</strong><br><span>Replace with a fitted website image in Elementor</span></div></div>';
-        return $this->html_widget( $html );
+        return $this->widget(
+            'spacer',
+            array(
+                'space' => array(
+                    'unit' => 'px',
+                    'size' => absint( $height ),
+                ),
+            )
+        );
     }
 
     private function nav_html( $items ) {
@@ -689,8 +677,6 @@ final class Tyese_AiSite_Elementor_Builder {
             'background_background' => 'classic',
             'background_color'      => '#ffffff',
             'hide_title'            => 'yes',
-            'viewport_md'           => 768,
-            'viewport_lg'           => 1025,
         );
     }
 
